@@ -1,8 +1,9 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 
-from data.samples import SampleData
+from samples import SampleData
 
 
 # Setup session variables -----------------------------------------------------
@@ -99,4 +100,90 @@ if st.session_state.current_chain >= 0 and st.session_state.sample_data != None:
                 ax.set_xlabel("Step")
                 st.pyplot(fig)
 
+    # Show diagnostics.
+    st.write(f'## Diagnostics for chain {st.session_state.current_chain}')
+    beta_diagnostics = chain.beta_diagnostics
+    # Display Geweke.
+    col1, col2 = st.columns(2, border=True)
+    with col1:
+        st.write("#### Geweke for β")
+        for i in range(chain.nbetas):
+            z_score = abs(beta_diagnostics[i].geweke_z)
+            z_ok = "✅"
+            if z_score > 3:
+                z_ok = "❌"
+            elif z_score > 1.96:
+                z_ok = "⚠️"
+            st.write(f"β[{i}] Geweke z-score: {z_score:.2f} {z_ok}")
+    with col2:
+        for i in range(chain.ngammas):
+            gamma_diagnostics = chain.gamma_diagnostics[i]
+            st.write(f"#### Geweke for γ group {i}")
+            for j in range(len(gamma_diagnostics)):
+                z_score = abs(gamma_diagnostics[j].geweke_z)
+                z_ok = "✅"
+                if z_score > 3:
+                    z_ok = "❌"
+                elif z_score > 1.96:
+                    z_ok = "⚠️"
+                st.write(f"γ[{j}] Geweke z-score: {z_score:.2f} {z_ok}")
 
+
+    # Display how many lags to reach < 0.1 autocorrelation.
+    col1, col2 = st.columns(2, border=True)
+    with col1:
+        st.write("#### Autocorrelation Lag for β")
+        for i in range(chain.nbetas):
+            acf = beta_diagnostics[i].acf
+            lag_01 = np.where(np.abs(acf) < 0.1)[0]
+            lag_01 = lag_01[0] if len(lag_01) > 0 else len(acf)
+            corr_ok = "✅"
+            if lag_01 > 50:
+                corr_ok = "❌"
+            elif lag_01 > 20:
+                corr_ok = "⚠️"
+            st.write(f"β[{i}] autocorr < 0.1 at lag {lag_01} {corr_ok}")
+    with col2:
+        for i in range(chain.ngammas):
+            gamma_diagnostics = chain.gamma_diagnostics[i]
+            st.write(f"#### Autocorrelation Lag for γ group {i}")
+            for j in range(len(gamma_diagnostics)):
+                acf = gamma_diagnostics[j].acf
+                lag_01 = np.where(np.abs(acf) < 0.1)[0]
+                lag_01 = lag_01[0] if len(lag_01) > 0 else len(acf)
+                corr_ok = "✅"
+                if lag_01 > 50:
+                    corr_ok = "❌"
+                elif lag_01 > 20:
+                    corr_ok = "⚠️"
+                st.write(f"γ[{j}] autocorr < 0.1 at lag {lag_01} {corr_ok}")
+    
+
+    # Plot autocorrelation functions.
+    col1, col2 = st.columns(2)
+    with col1:
+        st.write("#### Autocorrelation Function for β")
+        col11, col12, col13 = st.columns(3)
+        for i in range(chain.nbetas):
+            acf = beta_diagnostics[i].acf
+            with col11 if i % 3 == 0 else col12 if i % 3 == 1 else col13:
+                fig, ax = plt.subplots()
+                ax.bar(range(len(acf)), acf)
+                ax.set_title(f"ACF of β[{i}]")
+                ax.set_xlabel("Lag")
+                ax.set_ylabel("Autocorrelation")
+                st.pyplot(fig)
+    with col2:
+        for i in range(chain.ngammas):
+            gamma_diagnostics = chain.gamma_diagnostics[i]
+            st.write(f"#### Autocorrelation Function for γ group {i}")
+            col21, col22, col23 = st.columns(3)
+            for j in range(len(gamma_diagnostics)):
+                acf = gamma_diagnostics[j].acf
+                with col21 if j % 3 == 0 else col22 if j % 3 == 1 else col23:
+                    fig, ax = plt.subplots()
+                    ax.bar(range(len(acf)), acf)
+                    ax.set_title(f"ACF of γ[{j}]")
+                    ax.set_xlabel("Lag")
+                    ax.set_ylabel("Autocorrelation")
+                    st.pyplot(fig)

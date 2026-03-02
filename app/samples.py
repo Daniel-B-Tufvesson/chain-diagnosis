@@ -1,4 +1,5 @@
 import numpy as np
+from diagnostics import diagnose_single_chain
 
 class Chain:
     def __init__(self, betas: np.ndarray, gammas: list[np.ndarray]) -> None:
@@ -7,6 +8,8 @@ class Chain:
         self.length = betas.shape[0]
         self.nbetas = betas.shape[1]
         self.ngammas = len(gammas)
+        self.beta_diagnostics = [diagnose_single_chain(betas[:, i]) for i in range(self.nbetas)]
+        self.gamma_diagnostics = [[diagnose_single_chain(gamma[:, j]) for j in range(gamma.shape[1])] for gamma in gammas]
 
 
 class SampleData:

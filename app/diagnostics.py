@@ -118,6 +118,89 @@ def geweke_diagnostic(
     z = (mean_first - mean_last) / denom
     return float(z)
 
+
+def integrated_autocorrelation_time(chain: np.ndarray, max_lag: int | None = None) -> float:
+    """
+    Compute the integrated autocorrelation time (IAT) for a 1D MCMC chain.
+
+    Parameters
+    ----------
+    chain : np.ndarray
+        1D array of MCMC samples.
+    max_lag : int | None
+        Maximum lag to sum over. If None, uses min(100, n-1).
+
+    Returns
+    -------
+    float
+        Integrated autocorrelation time.
+    """
+    acf = autocorrelation_function(chain, max_lag=max_lag)
+    # IAT is 1 + 2 * sum_{k=1}^{max_lag} acf_k
+    iat = 1.0 + 2.0 * np.nansum(acf[1:])
+    return float(iat)
+
+def gelman_rubin_rhat(chains: np.ndarray) -> float:
+    """
+    Compute the Gelman-Rubin R-hat statistic for multiple MCMC chains.
+
+    Parameters
+    ----------
+    chains : np.ndarray
+        2D array of shape (n_chains, n_samples) containing MCMC samples.
+
+    Returns
+    -------
+    float
+        R-hat statistic.
+    """
+    chains = np.asarray(chains, dtype=float)
+    n_chains, n_samples = chains.shape
+
+    # Mean and variance for each chain
+    chain_means = np.mean(chains, axis=1)
+    chain_vars = np.var(chains, axis=1, ddof=1)
+
+    # Overall mean
+    overall_mean = np.mean(chain_means)
+
+    # Between-chain variance
+    B = n_samples * np.var(chain_means, ddof=1)
+
+    # Within-chain variance
+    W = np.mean(chain_vars)
+
+    # Estimate of marginal posterior variance
+    var_hat = ((n_samples - 1) / n_samples) * W + (1 / n_samples) * B
+
+    # R-hat statistic
+    rhat = np.sqrt(var_hat / W)
+    return float(rhat)
+
+def cumulative_gelman_rubin_rhat(chains: np.ndarray, min_samples: int = 20) -> np.ndarray:
+    """
+    Compute the cumulative Gelman-Rubin R-hat statistic for multiple chains.
+
+    Parameters
+    ----------
+    chains : np.ndarray
+        2D array of shape (n_chains, n_samples) containing MCMC samples.
+    min_samples : int
+        Minimum number of samples to start computing R-hat.
+
+    Returns
+    -------
+    np.ndarray
+        1D array of cumulative R-hat values for each sample index >= min_samples.
+    """
+    chains = np.asarray(chains, dtype=float)
+    n_chains, n_samples = chains.shape
+    rhat_values = np.full(n_samples, np.nan)
+    for t in range(min_samples, n_samples + 1):
+        rhat_values[t - 1] = gelman_rubin_rhat(chains[:, :t])
+    return rhat_values
+
+
 @dataclass
 class SingleChainDiagnostic:
     """
@@ -125,6 +208,9 @@ class SingleChainDiagnostic:
     """
     acf: np.ndarray
     geweke_z: float
+    iat: float
+    ess: float
+    mcse: float
 
 def diagnose_single_chain(chain: np.ndarray) -> SingleChainDiagnostic:
     """
@@ -141,4 +227,37 @@ def diagnose_single_chain(chain: np.ndarray) -> SingleChainDiagnostic:
     """
     acf = autocorrelation_function(chain)
     geweke_z = geweke_diagnostic(chain)
-    return SingleChainDiagnostic(acf=acf, geweke_z=geweke_z)
+    iat = integrated_autocorrelation_time(chain)
+    ess = len(chain) / iat
+    mcse = np.std(chain, ddof=1) / np.sqrt(ess) if ess > 0 else np.nan
+    return SingleChainDiagnostic(acf=acf, geweke_z=geweke_z, iat=iat, ess=ess, mcse=mcse)
+
+@dataclass
+class MultiChainDiagnostics:
+    """
+    Diagnostics for multiple MCMC chains.
+    """
+    gelman_rubin: float
+    cum_gelman_rubin: np.ndarray
+
+def diagnose_multiple_chains(chains: list[np.ndarray]) -> MultiChainDiagnostics:
+    """
+    Compute diagnostics for multiple MCMC chains.
+
+    Parameters
+    ----------
+    chains : list[np.ndarray]
+        List of 1D arrays, each representing an MCMC chain.
+
+    Returns
+    -------
+    MultiChainDiagnostics
+        Object containing diagnostics for multiple chains.
+    """
+
+    # Stack chains into a 2D array (n_chains x n_samples)
+    stacked_chains = np.stack(chains, axis=0)
+    gelman_rubin = gelman_rubin_rhat(stacked_chains)
+    cum_gelman_rubin = cumulative_gelman_rubin_rhat(stacked_chains)
+    
+    return MultiChainDiagnostics(gelman_rubin=gelman_rubin, cum_gelman_rubin=cum_gelman_rubin)
